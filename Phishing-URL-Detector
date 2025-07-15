@@ -1,0 +1,98 @@
+import requests
+import urllib.parse
+import socket
+import os
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+SUSPICIOUS_TLDS = {"zip", "tk", "xyz", "ml", "ga", "cf", "gq", "cc", "cn"}
+
+def is_ip_address(url):
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host = parsed.hostname
+        socket.inet_aton(host)
+        return True
+    except Exception:
+        return False
+
+def has_suspicious_tld(url):
+    parsed = urllib.parse.urlparse(url)
+    domain = parsed.hostname.lower() if parsed.hostname else ""
+    for tld in SUSPICIOUS_TLDS:
+        if domain.endswith("." + tld):
+            return True, tld
+    return False, None
+
+def contains_weird_characters(url):
+    return any(c in url for c in ['@', '%', '&', '=', ';'])
+
+def is_too_long(url):
+    return len(url) > 100
+
+def check_google_safe_browsing(url):
+    api_url = f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={GOOGLE_API_KEY}"
+    payload = {
+        "client": {
+            "clientId": "urlscanner",
+            "clientVersion": "1.0"
+        },
+        "threatInfo": {
+            "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
+            "platformTypes": ["ANY_PLATFORM"],
+            "threatEntryTypes": ["URL"],
+            "threatEntries": [{"url": url}]
+        }
+    }
+    try:
+        response = requests.post(api_url, json=payload)
+        data = response.json()
+        if "matches" in data:
+            return True, data["matches"]
+        return False, None
+    except Exception as e:
+        return False, f"Error checking Google Safe Browsing: {str(e)}"
+
+def heuristic_checks(url):
+    results = []
+    if is_ip_address(url):
+        results.append("Uses IP address instead of domain")
+    suspicious, tld = has_suspicious_tld(url)
+    if suspicious:
+        results.append(f"Suspicious TLD detected: .{tld}")
+    if contains_weird_characters(url):
+        results.append("Contains suspicious characters (@, %, &, =, ;)")
+    if is_too_long(url):
+        results.append("URL length unusually long")
+    return results
+
+def scan_url(url):
+    print(f"\n  Scanning URL: {url}")
+
+    heuristics = heuristic_checks(url)
+    if heuristics:
+        print(" Heuristic issues:")
+        for h in heuristics:
+            print(f"  - {h}")
+    else:
+        print(" No heuristic issues detected.")
+
+    print("\n Google Safe Browsing check...")
+    gs_hit, gs_data = check_google_safe_browsing(url)
+    if gs_hit:
+        print(" Google Safe Browsing flagged this URL!")
+        print(gs_data)
+    else:
+        print(" Google Safe Browsing: clean.")
+
+    print("\n Scan complete.\n")
+
+if __name__ == "__main__":
+    url = input("Enter a URL to scan: ").strip()
+    if not url.startswith("http"):
+        url = "http://" + url
+    scan_url(url)
